@@ -1,6 +1,6 @@
 #include <LoRaWan.h>
 #include <TinyGPS++.h>
-#include <SPI.h>
+#include <Wire.h>
 
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
   #define SERIAL SerialUSB
@@ -26,11 +26,6 @@
   #define RH_RF95_MAX_MESSAGE_LEN (RH_RF95_MAX_PAYLOAD_LEN - RH_RF95_HEADER_LEN)
 #endif
 
-// Pin for SPI (http://wiki.seeedstudio.com/Seeeduino_LoRAWAN/)
-#define MOSI 11 
-#define MISO 12
-#define SCK 13
-
 // All messages sent and received by this RH_RF95 Driver conform to this packet format:
 //
 // - LoRa mode:
@@ -47,15 +42,13 @@ uint8_t sentCounter = 0;
 
 // Object that contains last GPS data collected
 TinyGPSPlus gps;
-// Callback function for getGPSData function
-void (*callback)(TinyGPSPlus *) = &printGPSInfo;
 
-// SPI buffer
-//char buffer[100];
-// SPI array position
-//volatile int position = 0;
-// SPI flag for message complete
-//volatile bool IS_MESSAGE_COMPLETE;
+// I2C buffer
+char buffer[100];
+// I2C array position
+volatile int position = 0;
+// I2C flag for message complete
+volatile bool IS_MESSAGE_COMPLETE = true;
 
 //TODO creates fake data to feed the device for demo
 char *gpsStreamArray[] =  {
@@ -76,53 +69,51 @@ void setup() {
   delay(500);
   SERIAL.println("Seeduino LoRa radio init OK!");
 
-  // Turns on SPI in slave mode
-  //attachInterrupt(digitalPinToInterrupt(6), receive, RISING);
-  //SPI.usingInterrupt(digitalPinToInterrupt(6)); 
-  //SPI.begin();
+  // Turns on I2C in slave mode
+  Wire.begin(8);
+  Wire.onReceive(receive);
 
-  //delay(500);
-  //SERIAL.println("Seeduino LoRa SPI init OK!");
+  delay(500);
+  SERIAL.println("Seeduino LoRa I2C init OK!");
 }
 
 void loop() {
-  
-  // Collects GPS data
-  getGPSData(callback);
 
   // Checks if the message arrived from SPI
-//  if (IS_MESSAGE_COMPLETE) {
-//    // Puts the terminator string
-//    buffer[position] = 0;
-//    // Prints the message
-//    SERIAL.println(buffer);
-//
-//    char *message = "Message";
-//    // Sends message
-//    sendMessage(message);
-//    printTransmittedMessage(message); 
-//
-//    // Gets ready for an other interrupt
-//    //position = 0;
-//    //IS_MESSAGE_COMPLETE = false;
-//  }
+  if (IS_MESSAGE_COMPLETE) {
+    // Prints the message
+    SERIAL.println(buffer);
+
+    char *message;
+    
+    // Callback function for getGPSData function
+    void (*callback)(TinyGPSPlus *) = &generateAndSendPotholeInfo;
+    // Collects GPS data
+    getGPSData(callback);
+
+    // Gets ready for an other interrupt
+    position = 0;
+    IS_MESSAGE_COMPLETE = false;
+  }
 }
 
-// SPI interrupt routine
-//void receive() {
-//  // Grabs byte from SPI Data Register
-//  byte c = SPI.transfer(buffer[position]);
-//
-//  position++;
-//  // Adds to buffer if room
-//  // Newline means time to process buffer
-//  if (c == '\n') {
-//    // Sets the IS_MESSAGE_COMPLETE to true in order to allow loop to work
-//    IS_MESSAGE_COMPLETE = true;  
-//  }
-//}
+// I2C interrupt routine
+void receive(int howMany) {
+  while (Wire.available() > 0) { 
+    char c = Wire.read();
+    SERIAL.print(c);
+
+    buffer[position] = c;
+    position++;
+  }
+  // Puts the terminator string
+  buffer[position] = '\0';
+  // Sets to complete
+  IS_MESSAGE_COMPLETE = true;
+}
 
 void getGPSData(void (*callback)(TinyGPSPlus *)) {
+  SERIAL.println("getGPSData");
   // Reads from the serial
   while (Serial.available() > 0) {
     
@@ -159,7 +150,7 @@ void getGPSData(void (*callback)(TinyGPSPlus *)) {
   }
 }
 
-void sendMessage(char *message) {
+void sendMessage(char *message, void (*callback)(char *)) {
   // Clears sender buffer for outcoming message
   memset(TXBuffer + RH_RF95_HEADER_LEN, 0, RH_RF95_MAX_MESSAGE_LEN);
   
@@ -170,6 +161,10 @@ void sendMessage(char *message) {
 
   // Increase counter of sent messages
   sentCounter++;
+
+  if (callback != NULL) {
+    callback(message);
+  }
 }
 
 void printGPSInfo(TinyGPSPlus *gps_p) {
@@ -222,4 +217,37 @@ void printTransmittedMessage(char *message) {
   SERIAL.println("\t\t\t\t\t\t\t\t\tSending...");
   SERIAL.print("\t\t\t\t\t\t\t\t\t>>>>>>>>>>>> "); SERIAL.print(sentCounter); SERIAL.println(" >>>>>>>>>>>>");
   SERIAL.println();
+}
+
+void generateAndSendPotholeInfo(TinyGPSPlus *gps_p) {
+  TinyGPSPlus gps = *gps_p;
+  char *message;
+  
+  if (gps.location.isValid()) {
+    sprintf(message, "%06d,%06d", gps.location.lat(), gps.location.lng());
+  } else {
+    strcat(message, "-91,-181");
+  }
+
+  strcat(message, ",");
+  if (gps.date.isValid()) {
+    sprintf(message, "%02d", gps.date.value());
+  } else {
+    strcat(message, "0");
+  }
+
+  strcat(message, ",");
+  if (gps.time.isValid()) {
+    sprintf(message, "%02d", gps.time.value());
+  } else {
+    strcat(message, "0");
+  }
+  
+  strcat(message, "\n");
+  SERIAL.println(message);
+
+  // Callback function for getGPSData function
+  void (*callback)(char *) = &printTransmittedMessage;
+  // Sends message
+  sendMessage(message, callback);
 }
