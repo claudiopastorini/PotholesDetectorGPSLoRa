@@ -1,65 +1,93 @@
-#include <LoRaWan.h>
-#include <TinyGPS++.h>
-#include <Wire.h>
-
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
   #define SERIAL SerialUSB
 #else
   #define SERIAL Serial
 #endif
 
-// Max number of octets the LORA Rx/Tx FIFO can hold
-#define RH_RF95_FIFO_SIZE 255
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
+  #include <LoRaWan.h>
+  #include <TinyGPS++.h>
+  #include <Wire.h>
+  
+  #include <time.h>
+  #include <stdlib.h>
+  
+  // Max number of octets the LORA Rx/Tx FIFO can hold
+  #define RH_RF95_FIFO_SIZE 255
+  
+  // This is the maximum number of bytes that can be carried by the LORA.
+  // We use some for headers, keeping fewer for RadioHead messages
+  #define RH_RF95_MAX_PAYLOAD_LEN RH_RF95_FIFO_SIZE
+  
+  // The length of the headers we add.
+  // The headers are inside the LORA's payload
+  #define RH_RF95_HEADER_LEN 4
+  
+  // This is the maximum message length that can be supported by this driver. 
+  // Can be pre-defined to a smaller size (to save SRAM) prior to including this header
+  // Here we allow for 1 byte message length, 4 bytes headers, user data and 2 bytes of FCS
+  #ifndef RH_RF95_MAX_MESSAGE_LEN
+    #define RH_RF95_MAX_MESSAGE_LEN (RH_RF95_MAX_PAYLOAD_LEN - RH_RF95_HEADER_LEN)
+  #endif
+#elif defined(ARDUINO_SAMD_FEATHER_M0)
+  #include <SPI.h>
+  #include <RH_RF95.h>
 
-// This is the maximum number of bytes that can be carried by the LORA.
-// We use some for headers, keeping fewer for RadioHead messages
-#define RH_RF95_MAX_PAYLOAD_LEN RH_RF95_FIFO_SIZE
+  // Chip select pin
+  #define RFM95_CS 8
+  // Reset pin
+  #define RFM95_RST 4
+  // Interrupt pin
+  #define RFM95_INT 3
+  
+  // Must match the frequency of others nodes
+  #define RF95_FREQ 433
 
-// The length of the headers we add.
-// The headers are inside the LORA's payload
-#define RH_RF95_HEADER_LEN 4
-
-// This is the maximum message length that can be supported by this driver. 
-// Can be pre-defined to a smaller size (to save SRAM) prior to including this header
-// Here we allow for 1 byte message length, 4 bytes headers, user data and 2 bytes of FCS
-#ifndef RH_RF95_MAX_MESSAGE_LEN
-  #define RH_RF95_MAX_MESSAGE_LEN (RH_RF95_MAX_PAYLOAD_LEN - RH_RF95_HEADER_LEN)
+  // One second in milliseconds
+  #define MILLIS 1000
+  
+  // Singleton instance of the radio driver
+  RH_RF95 rf95(RFM95_CS, RFM95_INT);
 #endif
 
-// All messages sent and received by this RH_RF95 Driver conform to this packet format:
-//
-// - LoRa mode:
-// - 8 symbol PREAMBLE
-// - Explicit header with header CRC (handled internally by the radio)
-// - 4 octets HEADER: (TO, FROM, ID, FLAGS)
-// - 0 to 251 octets DATA 
-// - CRC (handled internally by the radio)
-// So we need to send 4 octect of header in order to allow the RF95 to understand the message
-unsigned char TXBuffer[RH_RF95_MAX_MESSAGE_LEN] = {0xFF, 0xFF, 0x0, 0x0};
-
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
+  unsigned char RXBuffer[RH_RF95_MAX_MESSAGE_LEN];
+  
+  // All messages sent and received by this RH_RF95 Driver conform to this packet format:
+  //
+  // - LoRa mode:
+  // - 8 symbol PREAMBLE
+  // - Explicit header with header CRC (handled internally by the radio)
+  // - 4 octets HEADER: (TO, FROM, ID, FLAGS)
+  // - 0 to 251 octets DATA 
+  // - CRC (handled internally by the radio)
+  // So we need to send 4 octect of header in order to allow the RF95 to understand the message
+  unsigned char TXBuffer[RH_RF95_MAX_MESSAGE_LEN] = {0xFF, 0xFF, 0x0, 0x0};
+  
+  // Object that contains last GPS data collected
+  TinyGPSPlus gps;
+  
+  // I2C buffer
+  char buffer[100];
+  // I2C array position
+  volatile int position = 0;
+  // I2C flag for message complete
+  volatile bool IS_MESSAGE_COMPLETE = true;
+#else
+  char RXBuffer[RH_RF95_MAX_MESSAGE_LEN];
+  uint8_t len = sizeof(RXBuffer);
+  unsigned char TXBuffer[RH_RF95_MAX_MESSAGE_LEN];
+#endif
+  
 // Counter of sent messages
 uint8_t sentCounter = 0;
-
-// Object that contains last GPS data collected
-TinyGPSPlus gps;
-
-// I2C buffer
-char buffer[100];
-// I2C array position
-volatile int position = 0;
-// I2C flag for message complete
-volatile bool IS_MESSAGE_COMPLETE = true;
+// Counter of received messages
+uint8_t receivedCounter = 0;
 
 //TODO creates fake data to feed the device for demo
-char *gpsStreamArray[] =  {
-  "$GPGGA,132508.101,4153.685,N,01230.144,E,1,12,1.0,0.0,M,0.0,M,,*6A\r\n"
-  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
-  "$GPRMC,132508.101,A,4153.685,N,01230.144,E,,,160518,000.0,W*75\r\n"
-};
-
-int i = 0;
 
 void setup() {
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
   Serial.begin(9600);
   SERIAL.begin(115200);
   lora.init();
@@ -71,20 +99,59 @@ void setup() {
 
   // Turns on I2C in slave mode
   Wire.begin(8);
-  Wire.onReceive(receive);
+  //Wire.onReceive(receive);
 
   delay(500);
   SERIAL.println("Seeduino LoRa I2C init OK!");
+
+  srand(time(NULL));
+#elif defined(ARDUINO_SAMD_FEATHER_M0)
+  pinMode(RFM95_RST, OUTPUT);
+  digitalWrite(RFM95_RST, HIGH);
+
+  SERIAL.begin(115200);
+  while (!SERIAL) {
+    delay(1);
+  }
+
+  delay(100);
+
+  // Manual reset
+  digitalWrite(RFM95_RST, LOW);
+  delay(10);
+  digitalWrite(RFM95_RST, HIGH);
+  delay(10);
+
+  while (!rf95.init()) {
+    SERIAL.println("Feather LoRa radio init failed");
+    while (1);
+  }
+  SERIAL.println("Feather LoRa radio init OK!");
+
+  // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
+  if (!rf95.setFrequency(RF95_FREQ)) {
+    SERIAL.println("setFrequency failed");
+    while (1);
+  }
+  
+  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
+
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+  // you can set transmitter powers from 5 to 23 dBm:
+  rf95.setTxPower(23, false);
+#else
+ SERIAL.println("NOT A VALID BOARD");
+#endif
 }
 
 void loop() {
 
-  // Checks if the message arrived from SPI
-  if (IS_MESSAGE_COMPLETE) {
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
+  // Checks if the message arrived from I2C
+  //if (IS_MESSAGE_COMPLETE) {
     // Prints the message
-    SERIAL.println(buffer);
-
-    char *message;
+    //SERIAL.println(buffer);
     
     // Callback function for getGPSData function
     void (*callback)(TinyGPSPlus *) = &generateAndSendPotholeInfo;
@@ -94,9 +161,26 @@ void loop() {
     // Gets ready for an other interrupt
     position = 0;
     IS_MESSAGE_COMPLETE = false;
+  //}
+
+  delay(100);
+#elif defined(ARDUINO_SAMD_FEATHER_M0)
+  char *message = NULL;
+  short rssi = 0;
+  
+  // Receives a message
+  if (!receiveMessage(&message, &rssi, 2)) {
+    return;
   }
+  
+  // Prints out the received message
+  //printReceivedMessage(message, rssi);
+  SERIAL.println(message);
+#endif
 }
 
+
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
 // I2C interrupt routine
 void receive(int howMany) {
   while (Wire.available() > 0) { 
@@ -113,7 +197,6 @@ void receive(int howMany) {
 }
 
 void getGPSData(void (*callback)(TinyGPSPlus *)) {
-  SERIAL.println("getGPSData");
   // Reads from the serial
   while (Serial.available() > 0) {
     
@@ -131,41 +214,12 @@ void getGPSData(void (*callback)(TinyGPSPlus *)) {
           printGPSInfo(&gps);
         }
       } else {
-        SERIAL.println("No data, use the fake one");
-
-        char *gpsStream = gpsStreamArray[i];
-        while (*gpsStream) {
-          if (gps.encode(*gpsStream++)) {
-            // Print the GPS info
-            printGPSInfo(&gps);  
-          }
-        }
-        i++;
-        if (i == (sizeof(gpsStreamArray) / sizeof(gpsStreamArray[0]))) {
-          i = 0;
-        }
-        delay(100);
+        SERIAL.println("No data");
       }
     }
   }
 }
 
-void sendMessage(char *message, void (*callback)(char *)) {
-  // Clears sender buffer for outcoming message
-  memset(TXBuffer + RH_RF95_HEADER_LEN, 0, RH_RF95_MAX_MESSAGE_LEN);
-  
-  // Adds message into the buffer
-  memcpy(TXBuffer + RH_RF95_HEADER_LEN, message, RH_RF95_MAX_MESSAGE_LEN);
-  
-  lora.transferPacketP2PMode(TXBuffer, RH_RF95_HEADER_LEN + strlen(message) + 1);
-
-  // Increase counter of sent messages
-  sentCounter++;
-
-  if (callback != NULL) {
-    callback(message);
-  }
-}
 
 void printGPSInfo(TinyGPSPlus *gps_p) {
   TinyGPSPlus gps = *gps_p;
@@ -210,44 +264,152 @@ void printGPSInfo(TinyGPSPlus *gps_p) {
   SERIAL.println();
 }
 
+void generateAndSendPotholeInfo(TinyGPSPlus *gps_p) {
+  TinyGPSPlus gps = *gps_p;
+  String message;
+
+  // Adds the position from the GPS   
+  if (gps.location.isValid()) {
+    message += String(gps.location.lat(), 6);
+    message += ",";
+    message += String(gps.location.lng(), 6);
+  } else {
+    message += "-91,-181";
+  }
+
+  // Adds the date from the GPS
+  message += ",";
+  if (gps.date.isValid()) {
+    message += gps.date.value();
+  } else {
+    message += "0";
+  }
+
+  // Adds the time from the GPS
+  message += ",";
+  if (gps.time.isValid()) {
+    message += gps.time.value();
+  } else {
+    message += "0";
+  }
+  SERIAL.println(message);
+
+  message += ",";
+  int rand_potholes = rand() % 20;
+  SERIAL.println(rand_potholes);
+  // Adds the number of the potholes detected
+  message += rand_potholes;
+  
+  // Declare a buffer
+  char buf[100];
+
+  // Copy this string into it
+  snprintf(buf, sizeof(buf)-1, "%s", message.c_str());
+  
+  // Ensure we're terminated
+  buf[sizeof(buf)] = '\0';
+
+  // Callback function for sendMessage function
+  void (*callback)(char *) = &printTransmittedMessage;
+  // Sends message
+  sendMessage(buf, callback);
+}
+#endif
+
+void sendMessage(char *message, void (*callback)(char *)) {
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
+  // Clears sender buffer for outcoming message
+  memset(TXBuffer + RH_RF95_HEADER_LEN, 0, RH_RF95_MAX_MESSAGE_LEN);
+  
+  // Adds message into the buffer
+  memcpy(TXBuffer + RH_RF95_HEADER_LEN, message, RH_RF95_MAX_MESSAGE_LEN);
+  
+  lora.transferPacketP2PMode(TXBuffer, RH_RF95_HEADER_LEN + strlen(message) + 1);
+#elif defined(ARDUINO_SAMD_FEATHER_M0)
+  // Clears sender buffer for outcoming message
+  memset(TXBuffer, 0, RH_RF95_MAX_MESSAGE_LEN);
+
+  // Adds message into the buffer
+  memcpy(TXBuffer, message, RH_RF95_MAX_MESSAGE_LEN);
+  
+  // Sends
+  rf95.send((uint8_t *)TXBuffer, strlen(message));
+
+  // Waits for complete transmission
+  delay(10);
+  rf95.waitPacketSent(); 
+#else
+  SERIAL.println("NOT A VALID BOARD");
+#endif
+
+  if (callback != NULL) {
+    callback(message);
+  }
+
+  // Increase counter of sent messages
+  sentCounter++;
+}
+
+bool receiveMessage(char **message, short *rssi, uint8_t seconds) {
+#if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
+  // Clears receive buffer for incoming message
+  memset(RXBuffer, 0, RH_RF95_FIFO_SIZE);
+  
+  // Receives
+  if (lora.receivePacketP2PMode(RXBuffer, RH_RF95_FIFO_SIZE,  rssi, seconds) <= 0) {
+    SERIAL.println("No message, is there a transmitter around?");
+    return false;
+  }
+
+  // Gets only the message payload to print without the header
+  *message = (char *) (RXBuffer + 4);
+#elif defined(ARDUINO_SAMD_FEATHER_M0)
+  // Waits for a message
+  if (!rf95.waitAvailableTimeout(1 * MILLIS)) { 
+    SERIAL.println("No message, is there a transmitter around?");
+    return false;
+  }
+  
+  // Should be a reply message for us now   
+  if (!rf95.recv((uint8_t *) RXBuffer, &len)) {  
+    SERIAL.println("Receive failed");
+    return false;
+  }
+
+  *message = (char *) RXBuffer;
+  *rssi = rf95.lastRssi();
+#else
+  SERIAL.println("NOT A VALID BOARD");
+#endif
+  
+  // Increase counter of received messages
+  receivedCounter++;
+  
+  return true;
+}
+
 void printTransmittedMessage(char *message) {
-  SERIAL.print("\t\t\t\t\t\t\t\t\t>>>>>>>>>>>> "); SERIAL.print(sentCounter); SERIAL.println(" >>>>>>>>>>>>");
+  SERIAL.print("\t\t\t\t\t\t\t\t\t>>>>>>>>>>>>>>>>>>>>>>>> "); SERIAL.print(sentCounter); SERIAL.println(" >>>>>>>>>>>>>>>>>>>>>>>>");
   SERIAL.print("\t\t\t\t\t\t\t\t\tSending: "); 
   SERIAL.println(message);
   SERIAL.println("\t\t\t\t\t\t\t\t\tSending...");
-  SERIAL.print("\t\t\t\t\t\t\t\t\t>>>>>>>>>>>> "); SERIAL.print(sentCounter); SERIAL.println(" >>>>>>>>>>>>");
+  SERIAL.print("\t\t\t\t\t\t\t\t\t>>>>>>>>>>>>>>>>>>>>>>>> "); SERIAL.print(sentCounter); SERIAL.println(" >>>>>>>>>>>>>>>>>>>>>>>>");
   SERIAL.println();
 }
 
-void generateAndSendPotholeInfo(TinyGPSPlus *gps_p) {
-  TinyGPSPlus gps = *gps_p;
-  char *message;
-  
-  if (gps.location.isValid()) {
-    sprintf(message, "%06d,%06d", gps.location.lat(), gps.location.lng());
-  } else {
-    strcat(message, "-91,-181");
-  }
-
-  strcat(message, ",");
-  if (gps.date.isValid()) {
-    sprintf(message, "%02d", gps.date.value());
-  } else {
-    strcat(message, "0");
-  }
-
-  strcat(message, ",");
-  if (gps.time.isValid()) {
-    sprintf(message, "%02d", gps.time.value());
-  } else {
-    strcat(message, "0");
-  }
-  
-  strcat(message, "\n");
+void printReceivedMessage(char *message, int8_t rssi) {
+  SERIAL.println();
+  SERIAL.print(">>>>>>>>>>>>>>>>>>>>>>>> ");
+  SERIAL.print(receivedCounter);
+  SERIAL.println(" >>>>>>>>>>>>>>>>>>>>>>>>");
+  SERIAL.print("Got: ");
   SERIAL.println(message);
-
-  // Callback function for getGPSData function
-  void (*callback)(char *) = &printTransmittedMessage;
-  // Sends message
-  sendMessage(message, callback);
+  SERIAL.print("Lenght: ");
+  SERIAL.println(strlen(message));
+  SERIAL.print("RSSI: ");
+  SERIAL.println(rssi, DEC);
+  SERIAL.print(">>>>>>>>>>>>>>>>>>>>>>>> ");
+  SERIAL.print(receivedCounter);
+  SERIAL.println(" >>>>>>>>>>>>>>>>>>>>>>>>");
+  SERIAL.println();
 }
