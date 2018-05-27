@@ -67,12 +67,10 @@
   // Object that contains last GPS data collected
   TinyGPSPlus gps;
   
-  // I2C buffer
-  char buffer[100];
-  // I2C array position
-  volatile int position = 0;
+  // I2C potholes_detected
+  int potholes_detected;
   // I2C flag for message complete
-  volatile bool IS_MESSAGE_COMPLETE = true;
+  volatile bool IS_MESSAGE_COMPLETE = false;
 #else
   char RXBuffer[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t len = sizeof(RXBuffer);
@@ -105,8 +103,8 @@ void setup() {
   SERIAL.println("Seeduino LoRa radio init OK!");
 
   // Turns on I2C in slave mode
-  Wire.begin(8);
-  //Wire.onReceive(receive);
+  Wire.begin(4);
+  Wire.onReceive(receive);
 
   delay(500);
   SERIAL.println("Seeduino LoRa I2C init OK!");
@@ -156,9 +154,10 @@ void loop() {
 
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
   // Checks if the message arrived from I2C
-  //if (IS_MESSAGE_COMPLETE) {
+  if (IS_MESSAGE_COMPLETE) {
     // Prints the message
-    //SERIAL.println(buffer);
+    SERIAL.println("Into the loop");
+    SERIAL.println();
     
     // Callback function for getGPSData function
     void (*callback)(TinyGPSPlus *) = &generateAndSendPotholeInfo;
@@ -166,9 +165,8 @@ void loop() {
     getGPSData(callback);
 
     // Gets ready for an other interrupt
-    position = 0;
     IS_MESSAGE_COMPLETE = false;
-  //}
+  }
   
   delay(1500);
 #elif defined(ARDUINO_SAMD_FEATHER_M0)
@@ -190,15 +188,15 @@ void loop() {
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
 // I2C interrupt routine
 void receive(int howMany) {
+  SERIAL.println("Into I2C receive callback");
+  
   while (Wire.available() > 0) { 
-    char c = Wire.read();
-    SERIAL.print(c);
-
-    buffer[position] = c;
-    position++;
+    potholes_detected = Wire.read();
+    SERIAL.print("Pothoes detected: ");
+    SERIAL.println(potholes_detected);
+    SERIAL.println();
   }
-  // Puts the terminator string
-  buffer[position] = '\0';
+  
   // Sets to complete
   IS_MESSAGE_COMPLETE = true;
 }
@@ -221,24 +219,7 @@ void getGPSData(void (*callback)(TinyGPSPlus *)) {
           printGPSInfo(&gps);
         }
       } else {
-        SERIAL.println("No data");
-
-        while (*gpsStream) {
-          if (gps.encode(*gpsStream++)) {
-            if (gps.location.isValid() && gps.location.isUpdated()) {
-              // If there is a callback
-              if (callback != NULL) {
-                // Call the callback
-                (*callback)(&gps);
-              // Otherwise  
-              } else {
-                // Print the GPS info
-                printGPSInfo(&gps);
-              } 
-            }
-          }
-        }
-       
+        SERIAL.println("No data");      
       }
     }
   }
@@ -304,8 +285,7 @@ void generateAndSendPotholeInfo(TinyGPSPlus *gps_p) {
   // Adds the date from the GPS
   message += ",";
   if (gps.date.isValid()) {
-    //message += gps.date.value();
-    message += "180518";
+    message += gps.date.value();
   } else {
     message += "0";
   }
@@ -317,13 +297,13 @@ void generateAndSendPotholeInfo(TinyGPSPlus *gps_p) {
   } else {
     message += "0";
   }
-  SERIAL.println(message);
 
   message += ",";
-  int rand_potholes = rand() % 20;
-  SERIAL.println(rand_potholes);
   // Adds the number of the potholes detected
-  message += rand_potholes;
+  message += potholes_detected;
+
+  SERIAL.print("Message to send: ");
+  SERIAL.println(message);
   
   // Declare a buffer
   char buf[100];
