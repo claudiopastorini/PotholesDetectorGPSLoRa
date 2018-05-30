@@ -71,6 +71,7 @@
   int potholes_detected;
   // I2C flag for message complete
   volatile bool IS_MESSAGE_COMPLETE = false;
+  volatile bool IS_IN_PROGRESS = false;
 #else
   char RXBuffer[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t len = sizeof(RXBuffer);
@@ -82,14 +83,64 @@ uint8_t sentCounter = 0;
 // Counter of received messages
 uint8_t receivedCounter = 0;
 
-//TODO creates fake data to feed the device for demo
-const char *gpsStream =
-  "$GPRMC,045103.000,A,3014.1984,N,09749.2872,W,0.67,161.46,030913,,,A*7C\r\n"
-  "$GPGGA,045104.000,3014.1985,N,09749.2873,W,1,09,1.2,211.6,M,-22.5,M,,0000*62\r\n"
-  "$GPRMC,045200.000,A,3014.3820,N,09748.9514,W,36.88,65.02,030913,,,A*77\r\n"
-  "$GPGGA,045201.000,3014.3864,N,09748.9411,W,1,10,1.2,200.8,M,-22.5,M,,0000*6C\r\n"
-  "$GPRMC,045251.000,A,3014.4275,N,09749.0626,W,0.51,217.94,030913,,,A*7D\r\n"
-  "$GPGGA,045252.000,3014.4273,N,09749.0628,W,1,09,1.3,206.9,M,-22.5,M,,0000*6F\r\n"; 
+char *gpsStreamArray[] = { 
+  "$GPGGA,195306.024,4153.933,N,01230.177,E,1,12,1.0,0.0,M,0.0,M,,*6B\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195306.024,A,4153.933,N,01230.177,E,356.4,223.7,300518,000.0,W*70\r\n",
+  "$GPGGA,195307.024,4153.853,N,01230.100,E,1,12,1.0,0.0,M,0.0,M,,*6D\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195307.024,A,4153.853,N,01230.100,E,092.9,230.3,300518,000.0,W*76\r\n",
+  "$GPGGA,195308.024,4153.834,N,01230.077,E,1,12,1.0,0.0,M,0.0,M,,*62\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195308.024,A,4153.834,N,01230.077,E,346.7,117.8,300518,000.0,W*70\r\n",
+  "$GPGGA,195309.024,4153.778,N,01230.183,E,1,12,1.0,0.0,M,0.0,M,,*6E\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195309.024,A,4153.778,N,01230.183,E,144.2,158.1,300518,000.0,W*7B\r\n",
+  "$GPGGA,195310.024,4153.740,N,01230.198,E,1,12,1.0,0.0,M,0.0,M,,*67\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195310.024,A,4153.740,N,01230.198,E,224.1,221.8,300518,000.0,W*70\r\n",
+  "$GPGGA,195311.024,4153.688,N,01230.152,E,1,12,1.0,0.0,M,0.0,M,,*65\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195311.024,A,4153.688,N,01230.152,E,185.8,230.3,300518,000.0,W*78\r\n",
+  "$GPGGA,195312.024,4153.650,N,01230.105,E,1,12,1.0,0.0,M,0.0,M,,*61\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195312.024,A,4153.650,N,01230.105,E,419.8,118.7,300518,000.0,W*71\r\n",
+  "$GPGGA,195313.024,4153.581,N,01230.231,E,1,12,1.0,0.0,M,0.0,M,,*6B\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195313.024,A,4153.581,N,01230.231,E,268.9,230.2,300518,000.0,W*76\r\n",
+  "$GPGGA,195314.024,4153.525,N,01230.165,E,1,12,1.0,0.0,M,0.0,M,,*60\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195314.024,A,4153.525,N,01230.165,E,183.5,205.7,300518,000.0,W*74\r\n",
+  "$GPGGA,195315.024,4153.477,N,01230.141,E,1,12,1.0,0.0,M,0.0,M,,*61\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195315.024,A,4153.477,N,01230.141,E,302.9,148.9,300518,000.0,W*76\r\n",
+  "$GPGGA,195316.024,4153.401,N,01230.188,E,1,12,1.0,0.0,M,0.0,M,,*66\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195316.024,A,4153.401,N,01230.188,E,145.7,140.7,300518,000.0,W*78\r\n",
+  "$GPGGA,195317.024,4153.366,N,01230.216,E,1,12,1.0,0.0,M,0.0,M,,*65\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195317.024,A,4153.366,N,01230.216,E,409.0,073.4,300518,000.0,W*73\r\n",
+  "$GPGGA,195318.024,4153.408,N,01230.358,E,1,12,1.0,0.0,M,0.0,M,,*6E\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195318.024,A,4153.408,N,01230.358,E,159.0,317.5,300518,000.0,W*78\r\n",
+  "$GPGGA,195319.024,4153.445,N,01230.324,E,1,12,1.0,0.0,M,0.0,M,,*6D\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195319.024,A,4153.445,N,01230.324,E,196.5,256.0,300518,000.0,W*7C\r\n",
+  "$GPGGA,195320.024,4153.427,N,01230.255,E,1,12,1.0,0.0,M,0.0,M,,*64\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195320.024,A,4153.427,N,01230.255,E,204.0,329.2,300518,000.0,W*73\r\n",
+  "$GPGGA,195321.024,4153.479,N,01230.224,E,1,12,1.0,0.0,M,0.0,M,,*68\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195321.024,A,4153.479,N,01230.224,E,210.8,065.3,300518,000.0,W*78\r\n",
+  "$GPGGA,195322.024,4153.510,N,01230.291,E,1,12,1.0,0.0,M,0.0,M,,*6B\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195322.024,A,4153.510,N,01230.291,E,214.2,153.1,300518,000.0,W*73\r\n",
+  "$GPGGA,195323.024,4153.454,N,01230.319,E,1,12,1.0,0.0,M,0.0,M,,*6A\r\n"
+  "$GPGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,1.0,1.0,1.0*30\r\n"
+  "$GPRMC,195323.024,A,4153.454,N,01230.319,E,214.2,153.1,300518,000.0,W*72\r\n"
+  };
+  
+int i = 0;
 
 void setup() {
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
@@ -154,7 +205,9 @@ void loop() {
 
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
   // Checks if the message arrived from I2C
-  if (IS_MESSAGE_COMPLETE) {
+  if (IS_MESSAGE_COMPLETE && !IS_IN_PROGRESS) {
+    IS_IN_PROGRESS = true;
+    
     // Prints the message
     SERIAL.println("Into the loop");
     SERIAL.println();
@@ -164,11 +217,9 @@ void loop() {
     // Collects GPS data
     getGPSData(callback);
 
-    // Gets ready for an other interrupt
     IS_MESSAGE_COMPLETE = false;
   }
-  
-  delay(1500);
+  delay(1000);
 #elif defined(ARDUINO_SAMD_FEATHER_M0)
   char *message = NULL;
   short rssi = 0;
@@ -188,39 +239,59 @@ void loop() {
 #if defined(ARDUINO_ARCH_SEEEDUINO_SAMD)
 // I2C interrupt routine
 void receive(int howMany) {
-  SERIAL.println("Into I2C receive callback");
-  
-  while (Wire.available() > 0) { 
-    potholes_detected = Wire.read();
-    SERIAL.print("Pothoes detected: ");
-    SERIAL.println(potholes_detected);
-    SERIAL.println();
+  if (!IS_MESSAGE_COMPLETE && !IS_IN_PROGRESS) {
+    SERIAL.println("Into I2C receive callback");
+    
+    while (Wire.available() > 0) { 
+      potholes_detected = Wire.read();
+      SERIAL.print("Pothoes detected: ");
+      SERIAL.println(potholes_detected);
+      SERIAL.println();
+    }
+    
+    // Sets to complete
+    IS_MESSAGE_COMPLETE = true;
   }
-  
-  // Sets to complete
-  IS_MESSAGE_COMPLETE = true;
 }
 
 void getGPSData(void (*callback)(TinyGPSPlus *)) {
   // Reads from the serial
-  while (Serial.available() > 0) {
+  while (Serial.available() > 0 && IS_IN_PROGRESS) {
     
     // Feeds the TinyGPSPlus object with the reading
     if (gps.encode(Serial.read())) {  
       // If the location is valid and it is updated 
       if (gps.location.isValid() && gps.location.isUpdated()) {
-        // If there is a callback
-        if (callback != NULL) {
-          // Call the callback
-          (*callback)(&gps);
-        // Otherwise  
-        } else {
-          // Print the GPS info
-          printGPSInfo(&gps);
-        }
+        SERIAL.println("Got real GPS");
       } else {
-        SERIAL.println("No data");      
+        SERIAL.println("No real GPS available");
       }
+    } else {
+      SERIAL.println("No data, use the fake one");
+      char *gpsStream = gpsStreamArray[i];
+      SERIAL.println("Use NMEA sentences: ");
+      SERIAL.println(gpsStream);
+      while (*gpsStream) {
+        if (gps.encode(*gpsStream++)) {
+          // If the location is valid and it is updated 
+          if (gps.location.isValid() && gps.location.isUpdated()) {
+            SERIAL.println("Got fake GPS");
+          } else {
+            SERIAL.println("No fake GPS available");
+          }
+        }
+      }
+      i = (i + 1) % (sizeof(gpsStreamArray) / sizeof(gpsStreamArray[0]));
+    }
+    
+    // If there is a callback
+    if (callback != NULL) {
+      // Call the callback
+      (*callback)(&gps);
+    // Otherwise  
+    } else {
+      // Print the GPS info
+      printGPSInfo(&gps);
     }
   }
 }
@@ -353,6 +424,9 @@ void sendMessage(char *message, void (*callback)(char *)) {
 
   // Increase counter of sent messages
   sentCounter++;
+
+  // Gets ready for an other interrupt
+  IS_IN_PROGRESS = false;
 }
 
 bool receiveMessage(char **message, short *rssi, uint8_t seconds) {
