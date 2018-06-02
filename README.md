@@ -47,4 +47,4 @@ Otherwise there is a `fake mode` that generates random positions in Rome around 
 
 ## Credits
 
-Claudio Pastorini: [LinkedIn](https://www.linkedin.com/in/claudio-pastorini/) | [WebSite](claudiopastorini.github.io) | [GitHub](https://github.com/claudiopastorini)
+Claudio Pastorini: [LinkedIn](https://www.linkedin.com/in/claudio-pastorini/) | [WebSite](https://claudiopastorini.github.io) | [GitHub](https://github.com/claudiopastorini)
