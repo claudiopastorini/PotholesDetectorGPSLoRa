@@ -34,13 +34,13 @@ Now you can download the board definition via the `Boards Manager`:
 * `Seeduino SAMD` for the Seeduino board
 * `Adafruit SAMD` for the Adafruit board
 
-### 2. Upload the code inside the boards
+### 3. Upload the code inside the boards
 Upload the code to the devices (the same code works with both boards, it autodetects during compiling phase the right code to upload)
 
-### 3. Testing board
+### 4. Testing board
 You will see on the serial monitor of the Seeduino all the messages received via **I²C**, the collected position with date and time via **GPS** and the message to send over the **LoRa**.
 
-### 4. Demo Mode
+### 5. Demo Mode
 Because it is very difficult to take **GPS** position inside, there is a `demo mode` that uses constant positions in order to simulate a route.
 
 Otherwise there is a `fake mode` that generates random positions in Rome around our departement, [DIAG](https://www.dis.uniroma1.it/en), you have only to change the value of the variable `IS_GPS_DATA_FAKE` inside the code.
