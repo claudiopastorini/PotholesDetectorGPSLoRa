@@ -72,6 +72,7 @@
   // I2C flag for message complete
   volatile bool IS_MESSAGE_COMPLETE = false;
   volatile bool IS_IN_PROGRESS = false;
+  volatile bool IS_GPS_DATA_FAKE = true;
 #else
   char RXBuffer[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t len = sizeof(RXBuffer);
@@ -199,6 +200,7 @@ void setup() {
 #else
  SERIAL.println("NOT A VALID BOARD");
 #endif
+  srand (time(NULL));
 }
 
 void loop() {
@@ -255,6 +257,7 @@ void receive(int howMany) {
 }
 
 void getGPSData(void (*callback)(TinyGPSPlus *)) {
+  IS_GPS_DATA_FAKE = true;
   // Reads from the serial
   while (Serial.available() > 0 && IS_IN_PROGRESS) {
     
@@ -263,6 +266,7 @@ void getGPSData(void (*callback)(TinyGPSPlus *)) {
       // If the location is valid and it is updated 
       if (gps.location.isValid() && gps.location.isUpdated()) {
         SERIAL.println("Got real GPS");
+        IS_GPS_DATA_FAKE = false;
       } else {
         SERIAL.println("No real GPS available");
       }
@@ -343,12 +347,23 @@ void printGPSInfo(TinyGPSPlus *gps_p) {
 void generateAndSendPotholeInfo(TinyGPSPlus *gps_p) {
   TinyGPSPlus gps = *gps_p;
   String message;
+  String bin;
 
   // Adds the position from the GPS   
   if (gps.location.isValid()) {
-    message += String(gps.location.lat(), 6);
-    message += ",";
-    message += String(gps.location.lng(), 6);
+    // This data is fake
+    if(IS_GPS_DATA_FAKE){
+      message += "41." + String ((rand() % 8964) + 899862);
+      message += ",";
+      message += "12." + String ((rand() % 20490) + 476759);
+      // Remove flush from gps object
+      bin += String(gps.location.lat(), 6);
+      bin += String(gps.location.lng(), 6);
+    }else{
+      message += String(gps.location.lat(), 6);
+      message += ",";
+      message += String(gps.location.lng(), 6);
+    }
   } else {
     message += "-91,-181";
   }
